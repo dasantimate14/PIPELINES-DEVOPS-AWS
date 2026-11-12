@@ -23,7 +23,7 @@ def version():
 
 @app.get("/api/items") #Lista los elementos
 def items_list():
-    return {"Items": items}
+    return items
 
 @app.post("/api/items", status_code=201) #Crea un elemento
 def crear_item(nuevo: ItemNuevo) -> Item:
