@@ -11,3 +11,7 @@ def test_crear_y_listar():
     
     lista = client.get("/api/items").json()
     assert any(item["titulo"] == "prueba" for item in lista)
+    
+def test_titulo_vacio():
+        creado = client.post("/api/items", json={"descripcion": "prueba"})
+        assert creado.status_code == 422
