@@ -1,8 +1,9 @@
 # Pipeline 1: aplica terraform/infra/ con el rol devops-final-gh-infra (OIDC, sin llaves).
 #
 # Variables de repositorio requeridas (Settings > Secrets and variables > Actions > Variables):
-#   AWS_ROLE_INFRA_ARN -> output rol_infra_arn de terraform/bootstrap/
-#   TF_STATE_BUCKET    -> output s3_bucket_name de terraform/bootstrap/
+#   AWS_REGION      -> us-east-1
+#   AWS_ROLE_INFRA  -> output rol_infra_arn de terraform/bootstrap/
+#   TF_STATE_BUCKET -> output s3_bucket_name de terraform/bootstrap/
 
 name: "Pipeline 1 - Infraestructura"
 
@@ -11,7 +12,7 @@ on:
     branches: [main]
     paths:
       - "terraform/infra/**"
-      - ".github/workflows/pipeline-1-infra.yml"
+      - ".github/workflows/1-infra.yml"
   workflow_dispatch: # ejecucion manual desde la pestana Actions
 
 # Nunca dos ejecuciones de Terraform a la vez sobre el mismo estado. use_lockfile
@@ -25,7 +26,7 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: ${{ vars.AWS_REGION }}
   TF_IN_AUTOMATION: "true" # salida de Terraform sin sugerencias para humanos
   TF_INPUT: "false"        # falla en vez de quedarse esperando una respuesta
 
@@ -42,9 +43,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Credenciales de AWS por OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_INFRA_ARN }}
+          role-to-assume: ${{ vars.AWS_ROLE_INFRA }}
           aws-region: ${{ env.AWS_REGION }}
           # Reemplaza el numero de cuenta por *** en todos los logs del job
           # (incluida la salida de terraform plan, apply y outputs).
