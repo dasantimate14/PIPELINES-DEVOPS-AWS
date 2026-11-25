@@ -47,7 +47,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_INFRA_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           # Reemplaza el numero de cuenta por *** en todos los logs del job
-          # (incluida la salida de terraform plan y apply).
+          # (incluida la salida de terraform plan, apply y outputs).
           mask-aws-account-id: true
 
       # El ARN es arn:aws:sts::<cuenta>:assumed-role/<rol>/<sesion>;
