@@ -2,7 +2,7 @@ locals {
   account_id = data.aws_caller_identity.actual.account_id
 
   # Nombres que terraform/infra/
-  ecs_cluster        = "${var.proyecto}-cluster"
+  ecs_cluster        = "var.proyecto"
   ecs_servicios      = ["${var.proyecto}-backend", "${var.proyecto}-frontend"]
   ecs_rol_ejecucion  = "${var.proyecto}-ecs-ejecucion"
   ecr_repositorios   = ["${var.proyecto}-backend", "${var.proyecto}-frontend"]

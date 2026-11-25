@@ -21,7 +21,9 @@ El bloque `backend "s3"` no acepta variables, así que el bucket y la región se
 El nombre del bucket es el output `s3_bucket_name` de `bootstrap/`.
 
 ```powershell
-$bucket = terraform -chdir=../bootstrap output -raw s3_bucket_name
+# Comillas obligatorias en PowerShell 5.1: sin ellas parte "-chdir=..." en dos argumentos.
+$bucket = terraform "-chdir=../bootstrap" output -raw s3_bucket_name
+if (-not $bucket) { throw "No se obtuvo el nombre del bucket" }
 terraform init -backend-config="bucket=$bucket" -backend-config="region=us-east-1"
 ```
 

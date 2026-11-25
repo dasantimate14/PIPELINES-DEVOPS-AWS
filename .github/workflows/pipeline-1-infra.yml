@@ -1,0 +1,79 @@
+# Pipeline 1: aplica terraform/infra/ con el rol devops-final-gh-infra (OIDC, sin llaves).
+#
+# Variables de repositorio requeridas (Settings > Secrets and variables > Actions > Variables):
+#   AWS_ROLE_INFRA_ARN -> output rol_infra_arn de terraform/bootstrap/
+#   TF_STATE_BUCKET    -> output s3_bucket_name de terraform/bootstrap/
+
+name: "Pipeline 1 - Infraestructura"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/infra/**"
+      - ".github/workflows/pipeline-1-infra.yml"
+  workflow_dispatch: # ejecucion manual desde la pestana Actions
+
+# Nunca dos ejecuciones de Terraform a la vez sobre el mismo estado. use_lockfile
+# ya lo impediria, pero asi la segunda espera en vez de fallar por el bloqueo.
+concurrency:
+  group: terraform-infra
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # permite pedir el token OIDC que AWS valida contra el rol
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true" # salida de Terraform sin sugerencias para humanos
+  TF_INPUT: "false"        # falla en vez de quedarse esperando una respuesta
+
+jobs:
+  terraform:
+    name: "Terraform plan y apply"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Credenciales de AWS por OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_INFRA_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Identidad asumida
+        run: aws sts get-caller-identity --query Arn --output text
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+          terraform_wrapper: false
+
+      - name: Formato
+        run: terraform fmt -check -recursive
+
+      - name: Init
+        run: >
+          terraform init
+          -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          -backend-config="region=${{ env.AWS_REGION }}"
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        run: terraform plan -out=infra.tfplan
+
+      # Se aplica exactamente el plan revisado arriba, no uno nuevo.
+      - name: Apply
+        run: terraform apply infra.tfplan
+
+      - name: Outputs
+        run: terraform output
