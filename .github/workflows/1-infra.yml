@@ -1,9 +1,14 @@
-# Pipeline 1: aplica terraform/infra/ con el rol devops-final-gh-infra (OIDC, sin llaves).
+# Pipeline 1: aplica (o destruye) terraform/infra/ con el rol devops-final-gh-infra
+# (OIDC, sin llaves).
 #
 # Variables de repositorio requeridas (Settings > Secrets and variables > Actions > Variables):
 #   AWS_REGION      -> us-east-1
 #   AWS_ROLE_INFRA  -> output rol_infra_arn de terraform/bootstrap/
 #   TF_STATE_BUCKET -> output s3_bucket_name de terraform/bootstrap/
+#
+# - push a main: SIEMPRE apply.
+# - Run workflow (manual): apply o destroy. Destroy exige escribir "destruir" en la
+#   confirmacion, para que no se ejecute por un clic equivocado.
 
 name: "Pipeline 1 - Infraestructura"
 
@@ -14,6 +19,17 @@ on:
       - "terraform/infra/**"
       - ".github/workflows/1-infra.yml"
   workflow_dispatch: # ejecucion manual desde la pestana Actions
+    inputs:
+      accion:
+        description: "apply: crea o actualiza la infraestructura. destroy: la elimina por completo."
+        type: choice
+        options: [apply, destroy]
+        default: apply
+      confirmacion:
+        description: "Solo para destroy: escribe destruir"
+        type: string
+        required: false
+        default: ""
 
 # Nunca dos ejecuciones de Terraform a la vez sobre el mismo estado. use_lockfile
 # ya lo impediria, pero asi la segunda espera en vez de fallar por el bloqueo.
@@ -29,18 +45,31 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   TF_IN_AUTOMATION: "true" # salida de Terraform sin sugerencias para humanos
   TF_INPUT: "false"        # falla en vez de quedarse esperando una respuesta
+  # Un push no tiene entradas: la accion solo puede ser destroy en una ejecucion manual.
+  ACCION: ${{ github.event_name == 'workflow_dispatch' && inputs.accion || 'apply' }}
+  CONFIRMACION: ${{ inputs.confirmacion }}
 
 jobs:
   terraform:
-    name: "Terraform plan y apply"
+    name: "Terraform ${{ inputs.accion || 'apply' }}"
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: terraform/infra
 
     steps:
+      # Antes de pedir credenciales: un destroy sin confirmacion no llega a tocar AWS.
+      - name: Validar la accion
+        working-directory: .
+        run: |
+          echo "Accion: $ACCION"
+          if [ "$ACCION" = "destroy" ] && [ "$CONFIRMACION" != "destruir" ]; then
+            echo "::error::Para destruir la infraestructura escribe 'destruir' en la confirmacion."
+            exit 1
+          fi
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Credenciales de AWS por OIDC
         uses: aws-actions/configure-aws-credentials@v6
@@ -59,7 +88,7 @@ jobs:
           echo "Rol asumido: $rol"
 
       - name: Instalar Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.11.4
           terraform_wrapper: false
@@ -76,12 +105,19 @@ jobs:
       - name: Validate
         run: terraform validate
 
+      # Con destroy, el plan lista lo que se eliminara; queda en el log como evidencia.
       - name: Plan
-        run: terraform plan -out=infra.tfplan
+        run: |
+          if [ "$ACCION" = "destroy" ]; then
+            terraform plan -destroy -out=infra.tfplan
+          else
+            terraform plan -out=infra.tfplan
+          fi
 
-      # Se aplica exactamente el plan revisado arriba, no uno nuevo.
+      # Se aplica exactamente el plan revisado arriba, no uno nuevo (sea apply o destroy).
       - name: Apply
         run: terraform apply infra.tfplan
 
       - name: Outputs
+        if: env.ACCION == 'apply'
         run: terraform output

@@ -6,16 +6,16 @@ output "s3_bucket_name" {
 }
 
 output "rol_infra_arn" {
-  description = "ARN del rol del pipeline 1, terraform de infra (variable AWS_ROLE_INFRA_ARN)"
+  description = "ARN del rol del pipeline 1, terraform de infra (variable AWS_ROLE_INFRA)"
   value       = aws_iam_role.gh_infra.arn
 }
 
 output "rol_build_arn" {
-  description = "ARN del rol del pipeline 2, build y push a ECR (variable AWS_ROLE_BUILD_ARN)"
+  description = "ARN del rol del pipeline 2, build y push a ECR (variable AWS_ROLE_BUILD)"
   value       = aws_iam_role.gh_build.arn
 }
 
 output "rol_deploy_arn" {
-  description = "ARN del rol del pipeline 3, despliegue en ECS (variable AWS_ROLE_DEPLOY_ARN)"
+  description = "ARN del rol del pipeline 3, despliegue en ECS (variable AWS_ROLE_DEPLOY)"
   value       = aws_iam_role.gh_deploy.arn
 }
