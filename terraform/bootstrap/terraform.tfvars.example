@@ -7,4 +7,4 @@ github_sub = "repo:mi-usuario@12345678/mi-repo@987654321:ref:refs/heads/main"
 profile = "mi-perfil"
 
 # Region donde se desplegaran los recursos de AWS
-region = "us-east-2" 
+region = "us-east-1"
