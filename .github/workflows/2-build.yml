@@ -136,14 +136,30 @@ jobs:
       - name: Esperar el escaneo de vulnerabilidades
         continue-on-error: true
         run: |
+          # ECR inicia el escaneo unos segundos despues del push. Mientras tanto responde
+          # ScanNotFoundException, y el waiter de AWS falla de inmediato en vez de esperar;
+          # por eso primero se espera a que el escaneo exista (hasta 24 x 5 s = 2 min).
+          for intento in $(seq 1 24); do
+            if aws ecr describe-image-scan-findings --repository-name "$REPOSITORIO" \
+                 --image-id imageTag="$ETIQUETA" > /dev/null 2>&1; then
+              break
+            fi
+            echo "El escaneo aun no existe (intento $intento/24); reintento en 5 s."
+            sleep 5
+          done
+
+          # Ya existe: el waiter espera mientras este IN_PROGRESS.
           aws ecr wait image-scan-complete --repository-name "$REPOSITORIO" \
             --image-id imageTag="$ETIQUETA"
 
       - name: Resumen del escaneo
         continue-on-error: true
         run: |
-          hallazgos=$(aws ecr describe-image-scan-findings --repository-name "$REPOSITORIO" \
-                        --image-id imageTag="$ETIQUETA" --output json)
+          if ! hallazgos=$(aws ecr describe-image-scan-findings --repository-name "$REPOSITORIO" \
+                             --image-id imageTag="$ETIQUETA" --output json); then
+            printf '\n**Escaneo:** no disponible (ver el log de este paso)\n' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
           estado=$(jq -r '.imageScanStatus.status' <<< "$hallazgos")
           conteo=$(jq -r '.imageScanFindings.findingSeverityCounts // {}
