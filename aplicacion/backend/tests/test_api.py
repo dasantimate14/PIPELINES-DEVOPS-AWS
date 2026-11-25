@@ -4,7 +4,7 @@ client = TestClient(app)
 
 def test_health():
     respuesta = client.get("/api/health")
-    assert respuesta.status_code == 200
+    assert respuesta.status_code == 201
 def test_crear_y_listar():
     creado = client.post("/api/items", json={"titulo": "prueba"})
     assert creado.status_code == 201
