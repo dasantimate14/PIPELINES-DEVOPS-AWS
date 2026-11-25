@@ -46,9 +46,16 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_INFRA_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          # Reemplaza el numero de cuenta por *** en todos los logs del job
+          # (incluida la salida de terraform plan y apply).
+          mask-aws-account-id: true
 
+      # El ARN es arn:aws:sts::<cuenta>:assumed-role/<rol>/<sesion>;
+      # cut se queda con el segundo campo separado por "/", es decir, el nombre del rol.
       - name: Identidad asumida
-        run: aws sts get-caller-identity --query Arn --output text
+        run: |
+          rol=$(aws sts get-caller-identity --query Arn --output text | cut -d/ -f2)
+          echo "Rol asumido: $rol"
 
       - name: Instalar Terraform
         uses: hashicorp/setup-terraform@v3
