@@ -169,6 +169,17 @@ resource "aws_iam_role_policy" "gh_deploy_ecs" {
         Resource = local.ecs_servicios_arn
       },
       {
+        # El render copia los tags de la definicion de tarea (default_tags de Terraform);
+        # registrar una revision con tags exige ecs:TagResource.
+        Sid      = "EtiquetarTaskDefinitions"
+        Effect   = "Allow"
+        Action   = "ecs:TagResource"
+        Resource = "arn:aws:ecs:${var.region}:${local.account_id}:task-definition/${var.proyecto}-*"
+        Condition = {
+          StringEquals = { "ecs:CreateAction" = "RegisterTaskDefinition" }
+        }
+      },
+      {
         # RegisterTaskDefinition con executionRoleArn exige PassRole sobre ese rol.
         Sid      = "PasarRolEjecucion"
         Effect   = "Allow"
