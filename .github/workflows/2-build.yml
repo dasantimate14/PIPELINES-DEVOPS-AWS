@@ -113,7 +113,11 @@ jobs:
             resultado="Ya existia; no se reconstruyo"
             echo "$REPOSITORIO:$ETIQUETA ya existe en ECR."
           elif grep -q ImageNotFoundException <<< "$salida"; then
-            docker build --build-arg APP_VERSION="$ETIQUETA" -t "$uri" "aplicacion/$SERVICIO"
+            # Sin --provenance/--sbom, Docker publica un indice OCI (imagen + attestation)
+            # y la etiqueta apunta al indice; el escaneo basico de ECR solo analiza
+            # manifiestos de imagen, asi que la etiqueta quedaria sin escaneo.
+            docker build --provenance=false --sbom=false \
+              --build-arg APP_VERSION="$ETIQUETA" -t "$uri" "aplicacion/$SERVICIO"
             docker push "$uri"
             resultado="Construida y publicada"
           else
