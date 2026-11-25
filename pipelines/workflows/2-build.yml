@@ -1,0 +1,183 @@
+# Pipeline 2: prueba la aplicacion y publica las imagenes en ECR con el rol
+# devops-final-gh-build (OIDC, sin llaves).
+#
+# Variables de repositorio requeridas:
+#   AWS_REGION     -> us-east-1
+#   AWS_ROLE_BUILD -> output rol_build_arn de terraform/bootstrap/
+#
+# El Pipeline 3 se dispara al terminar este workflow y lo busca por su "name":
+# si lo cambias aqui, cambialo tambien en 3-deploy.yml.
+
+name: "Pipeline 2 - Construccion"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "aplicacion/**"
+  workflow_dispatch: # ejecucion manual desde la pestana Actions
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  # Sin credenciales de AWS: si una prueba falla, nada llega a ECR.
+  pruebas:
+    name: "Pruebas"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Instalar Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            aplicacion/backend/requirements.txt
+            aplicacion/backend/requirements-dev.txt
+
+      - name: Pruebas del backend
+        working-directory: aplicacion/backend
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+          python -m pytest
+
+      - name: Instalar Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: aplicacion/frontend/package-lock.json
+
+      # El frontend no tiene pruebas unitarias; compilarlo detecta errores de sintaxis,
+      # imports rotos y dependencias que no coinciden con el package-lock.json.
+      - name: Compilacion del frontend
+        working-directory: aplicacion/frontend
+        run: |
+          npm ci
+          npm run build
+
+  publicar:
+    name: "Publicar ${{ matrix.servicio }}"
+    needs: pruebas
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write # permite pedir el token OIDC que AWS valida contra el rol
+      contents: read
+
+    strategy:
+      fail-fast: false # si falla el backend, el frontend termina igual (y viceversa)
+      matrix:
+        servicio: [backend, frontend]
+
+    env:
+      SERVICIO: ${{ matrix.servicio }}
+      REPOSITORIO: devops-final-${{ matrix.servicio }}
+      # SHA completo del commit: identifica sin ambiguedad que codigo hay en la imagen.
+      ETIQUETA: ${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Credenciales de AWS por OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_BUILD }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Login en ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Idempotente: las etiquetas del repositorio son inmutables, asi que volver a
+      # publicar el mismo SHA fallaria. Si la imagen ya existe (re-run), no se construye.
+      # Solo ImageNotFoundException significa "no existe"; cualquier otro error
+      # (permisos, repositorio inexistente) detiene el job en vez de ocultarse.
+      - name: Construir y publicar
+        env:
+          REGISTRO: ${{ steps.ecr.outputs.registry }}
+        run: |
+          uri="$REGISTRO/$REPOSITORIO:$ETIQUETA"
+
+          if salida=$(aws ecr describe-images --repository-name "$REPOSITORIO" \
+                        --image-ids imageTag="$ETIQUETA" 2>&1); then
+            resultado="Ya existia; no se reconstruyo"
+            echo "$REPOSITORIO:$ETIQUETA ya existe en ECR."
+          elif grep -q ImageNotFoundException <<< "$salida"; then
+            # Sin --provenance/--sbom, Docker publica un indice OCI (imagen + attestation)
+            # y la etiqueta apunta al indice; el escaneo basico de ECR solo analiza
+            # manifiestos de imagen, asi que la etiqueta quedaria sin escaneo.
+            docker build --provenance=false --sbom=false \
+              --build-arg APP_VERSION="$ETIQUETA" -t "$uri" "aplicacion/$SERVICIO"
+            docker push "$uri"
+            resultado="Construida y publicada"
+          else
+            echo "::error::No se pudo consultar ECR: $salida"
+            exit 1
+          fi
+
+          # El resumen de la ejecucion no pasa por el filtro de los logs, asi que el
+          # numero de cuenta (inicio del registro) se reemplaza a mano.
+          {
+            echo "### Imagen de $SERVICIO"
+            echo ""
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| URI | \`***.${uri#*.}\` |"
+            echo "| Resultado | $resultado |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # El escaneo informa, no bloquea: si falla o tarda demasiado, el job sigue.
+      - name: Esperar el escaneo de vulnerabilidades
+        continue-on-error: true
+        run: |
+          # ECR inicia el escaneo unos segundos despues del push. Mientras tanto responde
+          # ScanNotFoundException, y el waiter de AWS falla de inmediato en vez de esperar;
+          # por eso primero se espera a que el escaneo exista (hasta 24 x 5 s = 2 min).
+          for intento in $(seq 1 24); do
+            if aws ecr describe-image-scan-findings --repository-name "$REPOSITORIO" \
+                 --image-id imageTag="$ETIQUETA" > /dev/null 2>&1; then
+              break
+            fi
+            echo "El escaneo aun no existe (intento $intento/24); reintento en 5 s."
+            sleep 5
+          done
+
+          # Ya existe: el waiter espera mientras este IN_PROGRESS.
+          aws ecr wait image-scan-complete --repository-name "$REPOSITORIO" \
+            --image-id imageTag="$ETIQUETA"
+
+      - name: Resumen del escaneo
+        continue-on-error: true
+        run: |
+          if ! hallazgos=$(aws ecr describe-image-scan-findings --repository-name "$REPOSITORIO" \
+                             --image-id imageTag="$ETIQUETA" --output json); then
+            printf '\n**Escaneo:** no disponible (ver el log de este paso)\n' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          estado=$(jq -r '.imageScanStatus.status' <<< "$hallazgos")
+          conteo=$(jq -r '.imageScanFindings.findingSeverityCounts // {}
+                          | to_entries[] | "| \(.key) | \(.value) |"' <<< "$hallazgos")
+
+          {
+            echo ""
+            echo "**Escaneo:** $estado"
+            echo ""
+            if [ -n "$conteo" ]; then
+              echo "| Severidad | Hallazgos |"
+              echo "|---|---|"
+              echo "$conteo"
+            else
+              echo "Sin hallazgos."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

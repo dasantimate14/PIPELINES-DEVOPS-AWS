@@ -1,0 +1,148 @@
+# Pipeline 3: despliega en ECS las imagenes publicadas por el Pipeline 2, con el rol
+# devops-final-gh-deploy (OIDC, sin llaves).
+#
+# Variables de repositorio requeridas:
+#   AWS_REGION      -> us-east-1
+#   AWS_ROLE_DEPLOY -> output rol_deploy_arn de terraform/bootstrap/
+#
+# Rollback o despliegue manual: Actions > Pipeline 3 - Despliegue > Run workflow,
+# con el SHA completo (40 caracteres) de un commit que el Pipeline 2 ya publico.
+
+name: "Pipeline 3 - Despliegue"
+
+on:
+  # Se dispara cuando termina el Pipeline 2 (con exito o no; la condicion del job filtra).
+  workflow_run:
+    workflows: ["Pipeline 2 - Construccion"] # debe coincidir con el "name" de 2-build.yml
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "SHA completo (40 caracteres) de las imagenes a desplegar"
+        required: true
+        type: string
+
+# Un solo despliegue a la vez. El segundo espera en vez de cancelar al primero: cortar
+# un despliegue a medias dejaria un servicio con la version nueva y otro con la vieja.
+concurrency:
+  group: despliegue-ecs
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # permite pedir el token OIDC que AWS valida contra el rol
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  CLUSTER: devops-final
+
+jobs:
+  desplegar:
+    name: "Desplegar en ECS"
+    # Manual: siempre. Automatico: solo si el Pipeline 2 termino con exito
+    # (si fallaron las pruebas, no hay imagenes nuevas que desplegar).
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    env:
+      # NUNCA github.sha. En un evento workflow_run, github.sha es el ultimo commit de
+      # main en el momento en que arranca ESTE workflow, no el que construyo el
+      # Pipeline 2. Si entre ambos llego otro commit (por ejemplo uno que solo cambia
+      # terraform/ y por eso no genero imagenes), se intentaria desplegar una etiqueta
+      # que no existe o que no es la que paso las pruebas. head_sha es exactamente el
+      # commit que el Pipeline 2 probo y publico.
+      ETIQUETA: ${{ inputs.image_tag || github.event.workflow_run.head_sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Credenciales de AWS por OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_DEPLOY }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      # Antes de tocar ECS: si falta alguna imagen, no se cambia nada.
+      - name: Verificar que las imagenes existen
+        run: |
+          echo "Etiqueta a desplegar: $ETIQUETA"
+
+          # Las etiquetas del Pipeline 2 son siempre el SHA completo; un SHA corto o
+          # cualquier otro texto no puede existir en ECR.
+          if ! [[ "$ETIQUETA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::'$ETIQUETA' no es un SHA completo de 40 caracteres (usa git rev-parse <commit>)."
+            exit 1
+          fi
+
+          falta=0
+          for repositorio in devops-final-backend devops-final-frontend; do
+            if salida=$(aws ecr describe-images --repository-name "$repositorio" \
+                          --image-ids imageTag="$ETIQUETA" 2>&1); then
+              echo "OK  $repositorio:$ETIQUETA"
+            elif grep -q ImageNotFoundException <<< "$salida"; then
+              echo "::error::No existe $repositorio:$ETIQUETA en ECR. Ejecuta el Pipeline 2 para ese commit o elige otro SHA."
+              falta=1
+            else
+              echo "::error::No se pudo consultar ECR: $salida"
+              exit 1
+            fi
+          done
+          exit "$falta"
+
+      # El rol de deploy no tiene ecr:GetAuthorizationToken (no hace login en ECR), asi
+      # que el registro se arma con la cuenta. GetCallerIdentity no requiere permisos y
+      # la cuenta aparece como *** en los logs.
+      - name: Direccion del registro de ECR
+        run: |
+          cuenta=$(aws sts get-caller-identity --query Account --output text)
+          echo "REGISTRO=$cuenta.dkr.ecr.$AWS_REGION.amazonaws.com" >> "$GITHUB_ENV"
+
+      # ---------------------------------------------------------------- backend
+      # Toma la ultima revision registrada de la familia y cambia solo la imagen;
+      # CPU, memoria, puertos, logs y rol de ejecucion siguen siendo los de Terraform.
+      - name: Preparar definicion de tarea del backend
+        id: td-backend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition-family: devops-final-backend
+          container-name: backend
+          image: ${{ env.REGISTRO }}/devops-final-backend:${{ env.ETIQUETA }}
+
+      - name: Desplegar backend
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.td-backend.outputs.task-definition }}
+          cluster: ${{ env.CLUSTER }}
+          service: devops-final-backend
+          desired-count: 1
+          wait-for-service-stability: true
+          wait-for-minutes: 10
+          wait-max-delay-seconds: 15
+
+      # El frontend va despues: cuando muestre la version nueva, la API que llama
+      # ya es la nueva.
+      # --------------------------------------------------------------- frontend
+      - name: Preparar definicion de tarea del frontend
+        id: td-frontend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition-family: devops-final-frontend
+          container-name: frontend
+          image: ${{ env.REGISTRO }}/devops-final-frontend:${{ env.ETIQUETA }}
+
+      - name: Desplegar frontend
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.td-frontend.outputs.task-definition }}
+          cluster: ${{ env.CLUSTER }}
+          service: devops-final-frontend
+          desired-count: 1
+          wait-for-service-stability: true
+          wait-for-minutes: 10
+          wait-max-delay-seconds: 15
+
+      - name: Prueba de humo
+        run: bash pipelines/scripts/smoke-test.sh

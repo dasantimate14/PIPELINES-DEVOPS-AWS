@@ -39,6 +39,10 @@ terraform output
 
 ### Destruir
 
+La forma recomendada es el **Pipeline 1** (*Run workflow* con `accion: destroy` y
+`confirmacion: destruir`), porque usa el rol `devops-final-gh-infra`, que tiene todos los
+permisos necesarios. Desde tu equipo solo funciona si tu perfil local también los tiene:
+
 ```powershell
 terraform plan -destroy -out=destroy.tfplan
 terraform apply destroy.tfplan      # equivalente a: terraform destroy
