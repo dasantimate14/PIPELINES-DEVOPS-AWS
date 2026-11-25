@@ -4,6 +4,16 @@ Aplicación web (frontend React + API FastAPI) que se prueba, se empaqueta y se 
 en Amazon ECS Fargate mediante tres pipelines de GitHub Actions, con toda la
 infraestructura definida en Terraform y sin una sola llave de acceso de AWS.
 
+### Contenido de la entrega
+
+| Se pide | Dónde está |
+|---|---|
+| Arquitectura | [2. Arquitectura](#2-arquitectura) |
+| Requisitos | [7. Requisitos](#7-requisitos) |
+| Pasos para reproducir la solución | [8. Reproducción paso a paso](#8-reproducción-paso-a-paso) |
+| Enlace o evidencia de la demo | [15. Demo](#15-demo) |
+| Pipelines | `.github/workflows/` (los que ejecuta GitHub) y su copia en `pipelines/workflows/` |
+
 ---
 
 ## Índice
@@ -798,6 +808,8 @@ tiene salida a internet. Con `endpoints_en_todas_las_zonas = true`, los endpoint
 │   ├── frontend/               React + Vite, nginx y Dockerfile
 │   ├── gateway/                nginx que imita al ALB en local
 │   └── compose.yaml            Entorno local
+├── docs/
+│   └── evidencias/             Capturas de la demo (sección 15)
 ├── pytest.ini                  Configuración de pytest para ejecutar desde la raíz
 ├── .gitattributes              Fuerza LF en *.sh
 └── .gitignore                  Estado, tfvars, planes, .env y dependencias
@@ -819,27 +831,72 @@ idéntica**.
 
 ## 15. Demo
 
-**Enlace a la grabación o evidencia:** _pendiente_
+| Campo | Valor |
+|---|---|
+| **Evidencia** | Capturas de esta sección, en [`docs/evidencias/`](docs/evidencias/) |
+| **Fecha de la demo** | 25 de noviembre de 2026 |
+| **Commit desplegado durante la demo** | `dee76844b7dec551851d9d2b071920b67b8ec3d3` (pie de página: `dee7684`) |
+| **Historial de ejecuciones** | Pestaña *Actions* del repositorio: Pipeline 1, 2 y 3 |
 
-**URL de la aplicación durante la demo:** _pendiente_ (output `alb_url`; deja de funcionar
-después de destruir la infraestructura)
+No se publica la URL de la aplicación: la genera AWS al crear el ALB y deja de funcionar
+cuando se destruye la infraestructura. Las capturas de abajo son la evidencia permanente.
 
 ### Evidencias
 
-| # | Prueba | Resultado esperado | Evidencia |
-|---|---|---|---|
-| 1 | Pipeline 1: apply inicial | `45 added` y outputs con la cuenta como `***` | _captura_ |
-| 2 | Pipeline 1 después de un despliegue | *No changes* | _captura_ |
-| 3 | Pipeline 1: destroy sin confirmación | Falla en *Validar la acción*, antes de las credenciales | _captura_ |
-| 4 | Pipeline 2: publicación | Dos imágenes con el SHA, escaneo COMPLETE | _captura_ |
-| 5 | Pipeline 2: *re-run* | "Ya existía; no se reconstruyó" | _captura_ |
-| 6 | Pipeline 2: prueba rota | Pruebas en rojo, *Publicar* en *skipped*, Pipeline 3 en *skipped* | _captura_ |
-| 7 | Encadenamiento 2 → 3 | Pipeline 3 disparado por `workflow_run` | _captura_ |
-| 8 | Prueba de humo | *Correcta*, con la URL y la etiqueta | _captura_ |
-| 9 | Servicios en ECS | 1/1 tareas, rollout `COMPLETED` | _captura_ |
-| 10 | Target groups | `healthy` | _captura_ |
-| 11 | Aplicación | SHA en el pie de página | _captura_ |
-| 12 | Rollback | Versión anterior visible y prueba de humo correcta con su SHA | _captura_ |
-| 13 | SHA inventado | Falla en *Verificar que las imágenes existen* sin tocar ECS | _captura_ |
-| 14 | Permiso faltante | `AccessDenied ecs:TagResource` y su corrección | _captura_ |
-| 15 | Cambio de Terraform | Plan con `~` (modificación en sitio) y el resultado en la consola | _captura_ |
+Las capturas están en [`docs/evidencias/`](docs/evidencias/), en el orden del flujo:
+infraestructura → construcción → despliegue → resultado.
+
+| # | Qué demuestra | Qué se ve |
+|---|---|---|
+| 01 | **Pipeline 1** aplica Terraform con OIDC | `Apply complete!` y los outputs, con el número de cuenta como `***` |
+| 02 | **Pipeline 1**: historial | Ejecuciones por push y manuales, todas en verde |
+| 03 | **Infraestructura**: red | VPC `devops-final-vpc` con 2 subredes públicas y 2 privadas en dos zonas, tablas de rutas, Internet Gateway y endpoint de S3 |
+| 04 | **Infraestructura**: ECR | Los repositorios `devops-final-backend` y `devops-final-frontend` |
+| 05 | **Pipeline 2** publica y escanea | Las dos imágenes con el SHA como etiqueta, escaneo COMPLETE y hallazgos por severidad |
+| 06 | **Pipeline 3**: mínimo privilegio | `AccessDenied ecs:TagResource`: el rol no tenía un permiso; se agregó solo esa acción |
+| 07 | **Pipeline 3**: cadena 2 → 3 y prueba de humo | Disparado por `workflow_run`; prueba de humo *Correcta* con la etiqueta esperada |
+| 08 | **Pipeline 3**: SHA inventado | Falla en *Verificar que las imagenes existen*; los pasos de despliegue quedan sin ejecutar y ECS no cambia |
+| 09 | **ECS**: clúster | `devops-final` con 2 servicios y 2 tareas en ejecución, 0 instancias EC2 (Fargate) |
+| 10 | **ECS**: servicios | Backend y frontend activos con 1/1 tareas, en la revisión 7 de su definición de tarea |
+| 11 | **Aplicación** desplegada | La página servida por el ALB, con el SHA `dee7684` en el pie de página para frontend y backend |
+| 12 | **ECR**: una imagen por commit | Cada etiqueta es el SHA completo de un commit; la más reciente (`dee7684…`) es la desplegada. Las dos más antiguas (`d4b216c…`, `abd1780…`) son de tipo *Image Index*, antes de `--provenance=false`; las siguientes ya son *Image* y por eso tienen escaneo |
+
+#### 01 · Pipeline 1: apply y outputs enmascarados
+![Pipeline 1: apply](docs/evidencias/01-p1-apply.png)
+
+#### 02 · Pipeline 1: historial de ejecuciones
+![Pipeline 1: historial](docs/evidencias/02-p1-historial.png)
+
+#### 03 · VPC y subredes
+![VPC y subredes](docs/evidencias/03-vpc-subredes.png)
+
+#### 04 · Repositorios de ECR
+![Repositorios de ECR](docs/evidencias/04-ecr-repositorios.png)
+
+#### 05 · Pipeline 2: imágenes publicadas y escaneo
+![Pipeline 2: publicación y escaneo](docs/evidencias/05-p2-publicacion-escaneo.png)
+
+#### 06 · Pipeline 3: permiso faltante detectado
+![Pipeline 3: AccessDenied](docs/evidencias/06-p3-permiso-faltante.png)
+
+#### 07 · Pipeline 3: encadenamiento y prueba de humo
+![Pipeline 3: prueba de humo](docs/evidencias/07-p3-cadena-y-prueba-humo.png)
+
+#### 08 · Pipeline 3: SHA inventado rechazado
+![Pipeline 3: SHA inventado](docs/evidencias/08-p3-sha-inventado.png)
+
+#### 09 · Clúster de ECS
+![Clúster de ECS](docs/evidencias/09-ecs-cluster.png)
+
+#### 10 · Servicios de ECS
+![Servicios de ECS](docs/evidencias/10-ecs-servicios.png)
+
+#### 11 · Aplicación desplegada
+![Aplicación desplegada](docs/evidencias/11-aplicacion.png)
+
+#### 12 · Imágenes en ECR etiquetadas con el SHA
+![Imágenes en ECR](docs/evidencias/12-ecr-imagenes-sha.png)
+
+> Antes de subir una captura, revisa que no se vea el número de cuenta de 12 dígitos, ni el
+> nombre completo del bucket del estado. En los logs de Actions aparecen como `***`; en la
+> consola de AWS no se enmascaran.
