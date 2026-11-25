@@ -60,7 +60,7 @@ export default function App() {
   return (
     <div className="pagina">
       <header>
-        <h1>Lista de elementos</h1>
+        <h1>Lista de elementos del equipo</h1>
         <p className="subtitulo">Frontend en React que consume una API en FastAPI, ambos en Amazon ECS.</p>
       </header>
 

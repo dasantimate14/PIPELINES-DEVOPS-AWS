@@ -4,7 +4,7 @@
   --texto: #1d1d1b;
   --suave: #6b6a66;
   --borde: #dedcd6;
-  --acento: #2f5d8a;
+  --acento: #2e7d4f;
   --error: #a33a2a;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   color: var(--texto);
@@ -18,7 +18,7 @@
     --texto: #ecebe7;
     --suave: #a3a19b;
     --borde: #3a3934;
-    --acento: #7fb0de;
+    --acento: #7fcf9c;
     --error: #e48a7a;
   }
 }
