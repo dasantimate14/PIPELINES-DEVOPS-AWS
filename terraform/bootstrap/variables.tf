@@ -11,11 +11,21 @@ variable "proyecto" {
 }
 
 variable "github_sub" {
-    description = "Valor del claim sub de los workflows de main, por ejemplo repo:dueno/repo:ref:refs/heads/main"
+    description = "Valor del claim sub de los workflows de main. Formato nuevo (repos creados desde el 15-jul-2026): repo:dueno@ORGID/repo@REPOID:ref:refs/heads/main. Formato anterior: repo:dueno/repo:ref:refs/heads/main"
     type = string
+    validation {
+        # can() devuelve false si regex() falla (no hay coincidencia), en vez de lanzar un error.
+        # Primera regex: formato anterior. Segunda regex: formato nuevo con IDs numericos.
+        condition = (
+            can(regex("^repo:[A-Za-z0-9-]+/[A-Za-z0-9._-]+:ref:refs/heads/main$", var.github_sub)) ||
+            can(regex("^repo:[A-Za-z0-9-]+@[0-9]+/[A-Za-z0-9._-]+@[0-9]+:ref:refs/heads/main$", var.github_sub))
+        )
+        error_message = "Debe tener el formato repo:dueno/repo:ref:refs/heads/main o repo:dueno@ORGID/repo@REPOID:ref:refs/heads/main."
+    }
 }
 
-validation {
-    condition = startswith(var.github_sub, "repo:") && endswith(var.github_sub, ":ref:refs/heads/main")
-    error_message = "Debe empezar con repo: y terminar en :ref:refs/heads/main
+variable "profile" {
+    description = "Nombre del perfil con los permisos minimos"
+    type = string
+    default = null
 }
