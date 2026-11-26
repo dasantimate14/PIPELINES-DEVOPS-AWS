@@ -61,7 +61,7 @@ export default function App() {
     <div className="pagina">
       <header>
         <h1>Lista de elementos del equipo</h1>
-        <p className="subtitulo">Frontend en React que consume una API en FastAPI, ambos en Amazon ECS y desplegados con GitHub Actions.</p>
+        <p className="subtitulo">Frontend en React que consume una API en FastAPI, ambos en Amazon ECS y desplegados con GitHub Actions. PRESENTACION EN VIVO</p>
       </header>
 
       <main>
